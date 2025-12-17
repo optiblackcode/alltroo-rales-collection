@@ -28,23 +28,23 @@ HEADERS = {
 }
 
 # ============================================================================
-# HELPERS
+# API HELPERS
 # ============================================================================
-def parse_concatenated_json_objects(raw_text: str):
-    objects = []
-    for line in raw_text.splitlines():
-        try:
-            objects.append(json.loads(line))
-        except json.JSONDecodeError:
-            pass
-    return objects
-
-
 def fetch_collections():
     try:
         res = requests.get(BASE_URL, headers=HEADERS)
         res.raise_for_status()
-        return res.json().get("collections", [])
+        data = res.json()
+
+        if isinstance(data, list):
+            return data
+
+        if isinstance(data, dict) and "collections" in data:
+            return data["collections"]
+
+        st.error("Unexpected collections response format")
+        return []
+
     except Exception as e:
         st.error(f"Failed to fetch collections: {e}")
         return []
@@ -55,15 +55,29 @@ def fetch_collection_details(collection_id):
         res = requests.get(f"{BASE_URL}/{collection_id}/content", headers=HEADERS)
         res.raise_for_status()
 
-        if res.headers.get("Content-Type", "").startswith("application/json"):
-            return res.json() if isinstance(res.json(), list) else []
+        raw = res.text.strip()
 
-        return parse_concatenated_json_objects(res.text)
+        # Try full JSON
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # Fallback: line-by-line JSON
+        rows = []
+        for line in raw.splitlines():
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+        return rows
 
     except Exception as e:
         st.error(f"Failed to fetch collection content: {e}")
         return []
-
 
 # ============================================================================
 # ALLTROO RALLY EXTRACTOR
@@ -71,58 +85,53 @@ def fetch_collection_details(collection_id):
 class AlltrooRallyExtractor:
     def __init__(self):
         self.rallies: List[Dict[str, str]] = []
-        self.error_message = None
-
-    def extract_from_html(self, html: str) -> bool:
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-            self.rallies = []
-
-            cards = soup.find_all("div", class_="card cardRally")
-            if not cards:
-                self.error_message = "No rallies found"
-                return False
-
-            for card in cards:
-                link = card.find("a", href=True)
-                image = card.find("img", src=True)
-                title = card.find("h3")
-                desc = card.find("span")
-
-                if not (link and title and desc):
-                    continue
-
-                image_url = image["src"] if image else ""
-                image_url = re.sub(r"-\d+x\d+", "", image_url)
-
-                self.rallies.append({
-                    "Rally Name": title.get_text(strip=True),
-                    "Description": desc.get_text(strip=True),
-                    "Link": link["href"],
-                    "Image URL": image_url
-                })
-
-            return True
-
-        except Exception as e:
-            self.error_message = str(e)
-            return False
+        self.error = None
 
     def from_url(self, url: str) -> bool:
         try:
             res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
             res.raise_for_status()
-            return self.extract_from_html(res.text)
+            return self._parse_html(res.text)
         except Exception as e:
-            self.error_message = str(e)
+            self.error = str(e)
             return False
+
+    def _parse_html(self, html: str) -> bool:
+        soup = BeautifulSoup(html, "html.parser")
+        cards = soup.find_all("div", class_="card cardRally")
+
+        if not cards:
+            self.error = "No rallies found"
+            return False
+
+        self.rallies = []
+
+        for card in cards:
+            link = card.find("a", href=True)
+            img = card.find("img", src=True)
+            title = card.find("h3")
+            desc = card.find("span")
+
+            if not (link and title and desc):
+                continue
+
+            image_url = img["src"] if img else ""
+            image_url = re.sub(r"-\d+x\d+", "", image_url)
+
+            self.rallies.append({
+                "Rally Name": title.get_text(strip=True),
+                "Description": desc.get_text(strip=True),
+                "Link": link["href"],
+                "Image URL": image_url
+            })
+
+        return True
 
     def dataframe(self):
         return pd.DataFrame(self.rallies)
 
-
 # ============================================================================
-# SIDEBAR NAVIGATION
+# SIDEBAR
 # ============================================================================
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
@@ -144,14 +153,12 @@ if page == "Customer.io Collection Manager":
     if not collections:
         st.warning("No collections found")
     else:
-        names = [c["name"] for c in collections]
-        id_map = {c["name"]: c["id"] for c in collections}
-
-        selected = st.selectbox("Select Collection", names)
-        collection_id = id_map[selected]
+        name_to_id = {c["name"]: c["id"] for c in collections}
+        selected = st.selectbox("Select Collection", list(name_to_id.keys()))
 
         if st.button("Fetch Collection Content"):
-            data = fetch_collection_details(collection_id)
+            data = fetch_collection_details(name_to_id[selected])
+
             if data:
                 df = pd.DataFrame(data)
                 st.dataframe(df, use_container_width=True, hide_index=True)
@@ -162,7 +169,6 @@ if page == "Customer.io Collection Manager":
                 st.download_button("Download CSV", df.to_csv(index=False), "collection.csv")
                 st.download_button("Download JSON", json_data, "collection.json")
 
-
 # ============================================================================
 # PAGE 2: LIVE RALLIES
 # ============================================================================
@@ -170,26 +176,26 @@ if page == "Live Rallies":
     st.title("🎪 Live Rallies")
 
     collections = fetch_collections()
-    names = [c["name"] for c in collections]
-    id_map = {c["name"]: c["id"] for c in collections}
+    if not collections:
+        st.warning("No collections found")
+    else:
+        name_to_id = {c["name"]: c["id"] for c in collections}
+        selected = st.selectbox("Select Rally Collection", list(name_to_id.keys()))
 
-    selected = st.selectbox("Select Rally Collection", names)
+        if st.button("Load Live Rallies"):
+            rallies = fetch_collection_details(name_to_id[selected])
 
-    if st.button("Load Live Rallies"):
-        rallies = fetch_collection_details(id_map[selected])
-
-        if rallies:
-            cols = st.columns(3)
-            for i, rally in enumerate(rallies):
-                with cols[i % 3]:
-                    st.markdown(f"### {rally.get('Rally Name', '-')}")
-                    st.image(rally.get("Image URL", ""), use_column_width=True)
-                    st.caption(rally.get("Description", ""))
-                    st.markdown(f"[Visit]({rally.get('Link', '#')})")
-
+            if rallies:
+                cols = st.columns(3)
+                for i, rally in enumerate(rallies):
+                    with cols[i % 3]:
+                        st.markdown(f"### {rally.get('Rally Name', '-')}")
+                        st.image(rally.get("Image URL", ""), use_column_width=True)
+                        st.caption(rally.get("Description", ""))
+                        st.markdown(f"[Visit Rally]({rally.get('Link', '#')})")
 
 # ============================================================================
-# PAGE 3: ALLTROO RALLY EXTRACTOR
+# PAGE 3: ALLTROO RALLY EXTRACTOR (UPLOAD FLOW)
 # ============================================================================
 if page == "Alltroo Rally Extractor":
     st.title("🎉 Alltroo Rally Extractor")
@@ -201,41 +207,52 @@ if page == "Alltroo Rally Extractor":
         value="https://alltroo.com/rallies/"
     )
 
-    collections = fetch_collections()
-    names = [c["name"] for c in collections]
-    id_map = {c["name"]: c["id"] for c in collections}
-
-    selected_collection = st.selectbox("Upload to Collection", names)
-
+    # STEP 1 — Extract
     if st.button("Extract Rallies", type="primary"):
         with st.spinner("Extracting rallies..."):
             success = extractor.from_url(url)
 
-        if success:
-            st.success(f"Extracted {len(extractor.rallies)} rallies")
+        if not success:
+            st.error(extractor.error)
         else:
-            st.error(extractor.error_message)
+            st.success(f"Extracted {len(extractor.rallies)} rallies")
+            st.session_state["rallies_ready"] = True
+            st.session_state["rallies"] = extractor.rallies
 
-    if extractor.rallies:
-        df = extractor.dataframe()
+    # STEP 2 — Preview + Select Collection
+    if st.session_state.get("rallies_ready"):
+        df = pd.DataFrame(st.session_state["rallies"])
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-        json_payload = json.dumps(extractor.rallies, indent=2)
-        st.text_area("JSON Payload", json_payload, height=300)
+        collections = fetch_collections()
+        name_to_id = {c["name"]: c["id"] for c in collections}
 
-        st.download_button("Download CSV", df.to_csv(index=False), "rallies.csv")
-        st.download_button("Download JSON", json_payload, "rallies.json")
+        selected_collection = st.selectbox(
+            "Select Collection to Upload",
+            list(name_to_id.keys())
+        )
+
+        if st.button("Next → Upload"):
+            st.session_state["selected_collection_id"] = name_to_id[selected_collection]
+            st.session_state["ready_to_upload"] = True
+
+    # STEP 3 — Upload (ONLY after Next)
+    if st.session_state.get("ready_to_upload"):
+        st.warning("This will REPLACE the collection content")
 
         if st.button("⬆️ Upload to Customer.io", type="primary"):
+            payload = json.dumps(st.session_state["rallies"], indent=2)
+
             with st.spinner("Uploading..."):
                 res = requests.put(
-                    f"{BASE_URL}/{id_map[selected_collection]}/content",
+                    f"{BASE_URL}/{st.session_state['selected_collection_id']}/content",
                     headers=HEADERS,
-                    data=json_payload
+                    data=payload
                 )
 
             if res.status_code in [200, 201, 204]:
                 st.success("✅ Upload successful")
+                st.session_state.clear()
             else:
                 st.error("❌ Upload failed")
                 st.code(res.text)
