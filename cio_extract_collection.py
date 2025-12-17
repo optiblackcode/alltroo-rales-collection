@@ -138,9 +138,9 @@ if collections:
                 if collection_data:
                     # Create a pandas DataFrame
                     df = pd.DataFrame(collection_data)
-                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.dataframe(df, use_container_width=True, hide_index=True)  # Hide index column
 
-                    # Step 4: Export to CSV
+                    # Step 4: Export to CSV without the index
                     csv_data = df.to_csv(index=False)
                     st.download_button(
                         label="Download as CSV",
@@ -148,6 +148,20 @@ if collections:
                         file_name=f"collection_{collection_id}.csv",
                         mime="text/csv"
                     )
+
+                    # Step 5: Display content as JSON
+                    json_data = json.dumps(collection_data, indent=2)
+                    st.subheader("Collection Content as JSON:")
+                    st.text_area("JSON Content", json_data, height=300)
+
+                    # Step 6: Export JSON content
+                    st.download_button(
+                        label="Download as JSON",
+                        data=json_data,
+                        file_name=f"collection_{collection_id}.json",
+                        mime="application/json"
+                    )
+
                 else:
                     st.warning("No data found for this collection.")
             else:
