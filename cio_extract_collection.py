@@ -18,6 +18,34 @@ headers = {
 }
 
 # ============================================================================
+# Helper function to parse concatenated JSON objects
+# ============================================================================
+def parse_concatenated_json_objects(raw_text: str):
+    """
+    Safely parses multiple JSON objects concatenated together.
+    Returns a list of dicts.
+    """
+    objects = []
+    buffer = ""
+    brace_count = 0
+
+    for char in raw_text:
+        if char == "{":
+            brace_count += 1
+        if brace_count > 0:
+            buffer += char
+        if char == "}":
+            brace_count -= 1
+            if brace_count == 0:
+                try:
+                    objects.append(json.loads(buffer))
+                except json.JSONDecodeError:
+                    pass
+                buffer = ""
+
+    return objects
+
+# ============================================================================
 # Fetch Collections List (GET /v1/collections)
 # ============================================================================
 def fetch_collections():
@@ -47,32 +75,30 @@ def fetch_collections():
 def fetch_collection_details(collection_id):
     """Fetch details of a specific collection"""
     url = f"{base_url}/{collection_id}/content"
+
     try:
         # Fetch response from API
         response = requests.get(url, headers=headers)
         response.raise_for_status()  # Raise an error for bad status codes
-        
+
         # Check if the response content type is JSON
         if response.headers['Content-Type'] == 'application/json':
             # Parse the JSON response
             return response.json()
-        else:
-            # Handle the case where the response contains multiple JSON objects
-            st.warning("Received multiple JSON objects concatenated together. Splitting them.")
-            raw_data = response.text
-            
-            # Split the concatenated JSON objects based on '} {'
-            # It assumes each object is separated by space or newline
-            try:
-                raw_data = f"[{raw_data.replace('} {', '},{')}]"
-                collection_data = json.loads(raw_data)
-                return collection_data
-            except json.JSONDecodeError as e:
-                st.error(f"Failed to decode the response: {e}")
-                return []
+
+        # Case 2: Broken / concatenated JSON objects (your case)
+        raw_text = response.text.strip()
+        parsed_objects = parse_concatenated_json_objects(raw_text)
+
+        if parsed_objects:
+            return parsed_objects
+
+        st.error("Could not parse collection content")
+        return []
+
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching collection details: {e}")
-        return {}
+        return []
 
 # ============================================================================
 # STREAMLIT UI
@@ -102,7 +128,7 @@ if collections:
         
         # Step 2: Fetch Collection Details
         if st.button("Get Collection Details"):
-            st.spinner("Fetching collection details...")
+            st.spinner("Fetching collection content...")
             collection_details = fetch_collection_details(collection_id)
             
             if collection_details:
@@ -112,8 +138,8 @@ if collections:
                 if collection_data:
                     # Create a pandas DataFrame
                     df = pd.DataFrame(collection_data)
-                    st.dataframe(df)
-                    
+                    st.dataframe(df, use_container_width=True)
+
                     # Step 4: Export to CSV
                     csv_data = df.to_csv(index=False)
                     st.download_button(
