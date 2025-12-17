@@ -375,6 +375,13 @@ if success and extractor.rallies:
         )
     
     st.divider()
+
+   # Assuming `extractor.rallies` is the data you want to display as JSON
+   json_data = json.dumps(extractor.rallies, indent=2)
+
+   # Display the collection content as JSON in a text area
+   st.subheader("Collection Content as JSON:")
+   st.text_area("JSON Content", json_data, height=300)
     
     # Export options
     st.markdown("### 🔄 Additional Options")
