@@ -28,7 +28,32 @@ HEADERS = {
 }
 
 # ============================================================================
-# API HELPERS
+# SAFETY HELPERS
+# ============================================================================
+def ensure_list_of_dicts(data):
+    """
+    Ensures data is List[Dict].
+    Prevents 'string indices must be integers' errors.
+    """
+    if not data:
+        return []
+
+    if isinstance(data, str):
+        try:
+            parsed = json.loads(data)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            return []
+
+    if isinstance(data, list) and all(isinstance(x, dict) for x in data):
+        return data
+
+    return []
+
+
+# ============================================================================
+# CUSTOMER.IO API HELPERS
 # ============================================================================
 def fetch_collections():
     try:
@@ -54,18 +79,17 @@ def fetch_collection_details(collection_id):
     try:
         res = requests.get(f"{BASE_URL}/{collection_id}/content", headers=HEADERS)
         res.raise_for_status()
-
         raw = res.text.strip()
 
         # Try full JSON
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, list):
-                return parsed
+                return ensure_list_of_dicts(parsed)
         except json.JSONDecodeError:
             pass
 
-        # Fallback: line-by-line JSON
+        # Fallback: line-by-line JSON (Customer.io behavior)
         rows = []
         for line in raw.splitlines():
             try:
@@ -73,7 +97,7 @@ def fetch_collection_details(collection_id):
             except json.JSONDecodeError:
                 continue
 
-        return rows
+        return ensure_list_of_dicts(rows)
 
     except Exception as e:
         st.error(f"Failed to fetch collection content: {e}")
@@ -105,24 +129,12 @@ class AlltrooRallyExtractor:
             return False
 
         self.rallies = []
-        
+
         for card in cards:
-            # Extract link (updated to use a tag with 'link--noStyle')
-            link_elem = card.find('a', href=True)
-            link = link_elem.get('href', '') if link_elem else ''
-                    
-            # Extract image URL (updated to grab image inside card__thumbnail)
-            img_elem = card.find('img', src=True)
-            image_url = img_elem.get('src', '') if img_elem else ''
-            img = re.sub(r'-\d+x\d+', '', image_url)  # Remove sizing
-                    
-            # Extract rally name (updated to find h3 tag)
-            name_elem = card.find('h3', class_='heading heading--xsmall')
-            title = name_elem.get_text(strip=True) if name_elem else ''
-                    
-            # Extract description (updated to find span with class 'body body--xsmall')
-            description_elem = card.find('span', class_='body body--xsmall')
-            desc = description_elem.get_text(strip=True) if description_elem else ''       
+            link = card.find("a", href=True)
+            img = card.find("img", src=True)
+            title = card.find("h3", class_="heading heading--xsmall")
+            desc = card.find("span", class_="body body--xsmall")
 
             if not (link and title and desc):
                 continue
@@ -143,7 +155,7 @@ class AlltrooRallyExtractor:
         return pd.DataFrame(self.rallies)
 
 # ============================================================================
-# SIDEBAR
+# SIDEBAR NAVIGATION
 # ============================================================================
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
@@ -176,7 +188,7 @@ if page == "Customer.io Collection Manager":
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
                 json_data = json.dumps(data, indent=2)
-                st.text_area("JSON", json_data, height=300)
+                st.text_area("JSON Content", json_data, height=300)
 
                 st.download_button("Download CSV", df.to_csv(index=False), "collection.csv")
                 st.download_button("Download JSON", json_data, "collection.json")
@@ -195,11 +207,16 @@ if page == "Live Rallies":
         selected = st.selectbox("Select Rally Collection", list(name_to_id.keys()))
 
         if st.button("Load Live Rallies"):
-            rallies = fetch_collection_details(name_to_id[selected])
+            rallies = ensure_list_of_dicts(
+                fetch_collection_details(name_to_id[selected])
+            )
 
             if rallies:
                 cols = st.columns(3)
                 for i, rally in enumerate(rallies):
+                    if not isinstance(rally, dict):
+                        continue
+
                     with cols[i % 3]:
                         st.markdown(f"### {rally.get('Rally Name', '-')}")
                         st.image(rally.get("Image URL", ""), use_column_width=True)
@@ -207,7 +224,7 @@ if page == "Live Rallies":
                         st.markdown(f"[Visit Rally]({rally.get('Link', '#')})")
 
 # ============================================================================
-# PAGE 3: ALLTROO RALLY EXTRACTOR (UPLOAD FLOW)
+# PAGE 3: ALLTROO RALLY EXTRACTOR (CONTROLLED UPLOAD FLOW)
 # ============================================================================
 if page == "Alltroo Rally Extractor":
     st.title("🎉 Alltroo Rally Extractor")
@@ -228,12 +245,13 @@ if page == "Alltroo Rally Extractor":
             st.error(extractor.error)
         else:
             st.success(f"Extracted {len(extractor.rallies)} rallies")
+            st.session_state["rallies"] = ensure_list_of_dicts(extractor.rallies)
             st.session_state["rallies_ready"] = True
-            st.session_state["rallies"] = extractor.rallies
 
     # STEP 2 — Preview + Select Collection
     if st.session_state.get("rallies_ready"):
-        df = pd.DataFrame(st.session_state["rallies"])
+        safe_rallies = ensure_list_of_dicts(st.session_state.get("rallies"))
+        df = pd.DataFrame(safe_rallies)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
         collections = fetch_collections()
@@ -248,14 +266,17 @@ if page == "Alltroo Rally Extractor":
             st.session_state["selected_collection_id"] = name_to_id[selected_collection]
             st.session_state["ready_to_upload"] = True
 
-    # STEP 3 — Upload (ONLY after Next)
+    # STEP 3 — Upload (ONLY AFTER NEXT)
     if st.session_state.get("ready_to_upload"):
-        st.warning("This will REPLACE the collection content")
+        st.warning("⚠️ This will REPLACE the collection content")
 
         if st.button("⬆️ Upload to Customer.io", type="primary"):
-            payload = json.dumps(st.session_state["rallies"], indent=2)
+            payload = json.dumps(
+                ensure_list_of_dicts(st.session_state.get("rallies")),
+                indent=2
+            )
 
-            with st.spinner("Uploading..."):
+            with st.spinner("Uploading to Customer.io..."):
                 res = requests.put(
                     f"{BASE_URL}/{st.session_state['selected_collection_id']}/content",
                     headers=HEADERS,
