@@ -138,7 +138,7 @@ if collections:
                 if collection_data:
                     # Create a pandas DataFrame
                     df = pd.DataFrame(collection_data)
-                    st.dataframe(df, use_container_width=True)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
 
                     # Step 4: Export to CSV
                     csv_data = df.to_csv(index=False)
