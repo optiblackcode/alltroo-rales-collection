@@ -101,54 +101,6 @@ def fetch_collection_details(collection_id):
         return []
 
 # ============================================================================
-# Live Rallies Data
-# ============================================================================
-rallies = [
-    {
-        "Description": "Win A Luxury Vacation to Hawaii",
-        "Image URL": "https://alltroo.com/wp-content/uploads/2025/11/PaulWalker_Hawaii_Q425_Site_RallyPage.jpg",
-        "Link": "https://alltroo.com/rally/paul-walker/",
-        "Rally Name": "Rally for the Paul Walker Foundation"
-    },
-    {
-        "Description": "Win a 2026 RAM 1500 with 650 horsepower",
-        "Image URL": "https://alltroo.com/wp-content/uploads/2025/12/DanaWhite_Q425_Site_2for1_RallyPage.jpg",
-        "Link": "https://alltroo.com/rally/ramrev/",
-        "Rally Name": "Rally with Dana White"
-    },
-    {
-        "Description": "Win a Trip to Meet TJ Hockenson at The Vikings vs. Packers Game",
-        "Image URL": "https://alltroo.com/wp-content/uploads/2025/11/TJHockenson_Q425_Site_RallyPage.jpg",
-        "Link": "https://alltroo.com/rally/tj-hockenson/",
-        "Rally Name": "Rally with TJ Hockenson"
-    },
-    {
-        "Description": "Win a trip to the US Virgin Islands to be part of a Private Old Dominion Concert Experience",
-        "Image URL": "https://alltroo.com/wp-content/uploads/2025/10/OldDominion_Q425_Site_RallyPage.jpg",
-        "Link": "https://alltroo.com/rally/old-dominion/",
-        "Rally Name": "Rally with Old Dominion"
-    },
-    {
-        "Description": "Meet George Kittle & Win a Custom Himalaya Defender 110 + $40,000 Cash",
-        "Image URL": "https://alltroo.com/wp-content/uploads/2025/10/HImalaya_Q425_Site_Card_3.jpg",
-        "Link": "https://alltroo.com/rally/georgekittle2/",
-        "Rally Name": "Rally with George Kittle"
-    },
-    {
-        "Description": "Meet Pete Davidson & Win His 1970 Chevy K5 Blazer",
-        "Image URL": "https://alltroo.com/wp-content/uploads/2025/09/PeteDavidson_Q325_Site_RallyPage.jpg",
-        "Link": "https://alltroo.com/rally/pete-davidson/",
-        "Rally Name": "Rally with Pete Davidson"
-    },
-    {
-        "Description": "Win a VIP Experience at the UFC Event of Your Choice in 2026",
-        "Image URL": "https://alltroo.com/wp-content/uploads/2025/02/UFC_4Ocean_Q325_Site_Octagon_RallyPage.jpg",
-        "Link": "https://alltroo.com/rally/4ocean/",
-        "Rally Name": "Rally for 4Ocean"
-    }
-]
-
-# ============================================================================
 # STREAMLIT UI
 # ============================================================================
 st.sidebar.title("Navigation")
@@ -226,22 +178,41 @@ if page == "Customer.io Collection Manager":
 if page == "Live Rallies":
     st.title("Live Rallies")
 
-    # Create a 3-column layout to display rallies in a grid format
-    columns = st.columns(3)
+    # Step 1: Dropdown for Collection Selection
+    st.markdown("### Select Collection for Live Rallies")
 
-    # Loop through the rallies and add them to the grid
-    for i, rally in enumerate(rallies):
-        # Determine the column to place the rally card
-        col = columns[i % 3]
+    collections = fetch_collections()
+
+    if collections:
+        collection_names = [col['name'] for col in collections]
+        collection_ids = {col['name']: col['id'] for col in collections}
         
-        with col:
-            # Display the image and description inside a clickable card-like structure
-            st.markdown(f"### {rally['Rally Name']}")
-            st.image(rally["Image URL"], caption=rally["Description"], use_column_width=True)
-            st.markdown(f"[Visit Rally]({rally['Link']})")
+        selected_collection = st.selectbox("Choose a collection", collection_names)
+        
+        if selected_collection:
+            collection_id = collection_ids[selected_collection]
+            
+            # Step 2: Fetch Collection Details
+            if st.button("Get Live Rallies"):
+                st.spinner("Fetching live rallies...")
+                collection_details = fetch_collection_details(collection_id)
+                
+                if collection_details:
+                    # Assuming the collection data contains rally information
+                    rallies = collection_details
+                    
+                    # Step 3: Display Live Rallies in a Grid
+                    columns = st.columns(3)
 
-    # Section for Opening Live Website
-    st.markdown("### Open Live Website")
-    url = st.text_input("Enter the URL to open", "https://alltroo.com/")
-    if url:
-        st.markdown(f"<iframe src='{url}' width='100%' height='600'></iframe>", unsafe_allow_html=True)
+                    for i, rally in enumerate(rallies):
+                        col = columns[i % 3]
+                        
+                        with col:
+                            # Display the image and description inside a clickable card-like structure
+                            st.markdown(f"### {rally.get('Rally Name', 'No Name Available')}")
+                            st.image(rally.get("Image URL", ""), caption=rally.get("Description", "No Description"), use_column_width=True)
+                            st.markdown(f"[Visit Rally]({rally.get('Link', '#')})")
+                else:
+                    st.error("Failed to fetch live rallies.")
+    else:
+        st.warning("No collections found. Please check your API key or the Customer.io account.")
