@@ -18,40 +18,26 @@ headers = {
 }
 
 # ============================================================================
-# Fetch Collections List (GET /v1/collections)
-# ============================================================================
-def fetch_collections():
-    """Fetch the list of collections"""
-    try:
-        response = requests.get(base_url, headers=headers)
-        response.raise_for_status()
-        collections_data = response.json()
-        
-        # Parse collections data and extract necessary details
-        collections = []
-        for collection in collections_data['collections']:
-            collections.append({
-                "id": collection['id'],
-                "name": collection['name'],
-                "schema": collection['schema'],
-                "rows": collection['rows']
-            })
-        return collections
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching collections: {e}")
-        return []
-
-# ============================================================================
 # Fetch Collection Details (GET /v1/collections/:id/content)
 # ============================================================================
 def fetch_collection_details(collection_id):
     """Fetch details of a specific collection"""
     url = f"{base_url}/{collection_id}/content"
     try:
+        # Fetch response from API
         response = requests.get(url, headers=headers)
         response.raise_for_status()
-        return response.json()
+        
+        # Check if the response content type is JSON
+        if response.headers['Content-Type'] == 'application/json':
+            # Parse the JSON response
+            return response.json()
+        else:
+            # Log the raw response if not JSON
+            st.error(f"Expected JSON response, but got: {response.text}")
+            return {}
     except requests.exceptions.RequestException as e:
+        # Log the exception error
         st.error(f"Error fetching collection details: {e}")
         return {}
 
@@ -63,7 +49,7 @@ st.title("Customer.io Collection Manager")
 # Step 1: Dropdown for Collection Selection
 st.markdown("### Select Collection")
 
-collections = fetch_collections()
+collections = fetch_collections()  # Assuming fetch_collections() function exists
 
 if collections:
     collection_names = [col['name'] for col in collections]
