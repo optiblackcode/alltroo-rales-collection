@@ -18,6 +18,30 @@ headers = {
 }
 
 # ============================================================================
+# Fetch Collections List (GET /v1/collections)
+# ============================================================================
+def fetch_collections():
+    """Fetch the list of collections"""
+    try:
+        response = requests.get(base_url, headers=headers)
+        response.raise_for_status()  # Raise an error for bad status codes
+        collections_data = response.json()
+        
+        # Parse collections data and extract necessary details
+        collections = []
+        for collection in collections_data['collections']:
+            collections.append({
+                "id": collection['id'],
+                "name": collection['name'],
+                "schema": collection['schema'],
+                "rows": collection['rows']
+            })
+        return collections
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching collections: {e}")
+        return []
+
+# ============================================================================
 # Fetch Collection Details (GET /v1/collections/:id/content)
 # ============================================================================
 def fetch_collection_details(collection_id):
@@ -48,7 +72,7 @@ def fetch_collection_details(collection_id):
                 return []
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching collection details: {e}")
-        return []
+        return {}
 
 # ============================================================================
 # STREAMLIT UI
@@ -58,7 +82,7 @@ st.title("Customer.io Collection Manager")
 # Step 1: Dropdown for Collection Selection
 st.markdown("### Select Collection")
 
-collections = fetch_collections()  # Assuming fetch_collections() function exists
+collections = fetch_collections()
 
 if collections:
     collection_names = [col['name'] for col in collections]
