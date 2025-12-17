@@ -18,30 +18,6 @@ headers = {
 }
 
 # ============================================================================
-# Fetch Collections List (GET /v1/collections)
-# ============================================================================
-def fetch_collections():
-    """Fetch the list of collections"""
-    try:
-        response = requests.get(base_url, headers=headers)
-        response.raise_for_status()  # Raise an error for bad status codes
-        collections_data = response.json()
-        
-        # Parse collections data and extract necessary details
-        collections = []
-        for collection in collections_data['collections']:
-            collections.append({
-                "id": collection['id'],
-                "name": collection['name'],
-                "schema": collection['schema'],
-                "rows": collection['rows']
-            })
-        return collections
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching collections: {e}")
-        return []
-
-# ============================================================================
 # Fetch Collection Details (GET /v1/collections/:id/content)
 # ============================================================================
 def fetch_collection_details(collection_id):
@@ -57,12 +33,22 @@ def fetch_collection_details(collection_id):
             # Parse the JSON response
             return response.json()
         else:
-            # Log the raw response if not JSON
-            st.error(f"Expected JSON response, but got: {response.text}")
-            return {}
+            # Handle the case where the response contains multiple JSON objects
+            st.warning("Received multiple JSON objects concatenated together. Splitting them.")
+            raw_data = response.text
+            
+            # Split the concatenated JSON objects based on '} {'
+            # It assumes each object is separated by space or newline
+            try:
+                raw_data = f"[{raw_data.replace('} {', '},{')}]"
+                collection_data = json.loads(raw_data)
+                return collection_data
+            except json.JSONDecodeError as e:
+                st.error(f"Failed to decode the response: {e}")
+                return []
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching collection details: {e}")
-        return {}
+        return []
 
 # ============================================================================
 # STREAMLIT UI
@@ -72,7 +58,7 @@ st.title("Customer.io Collection Manager")
 # Step 1: Dropdown for Collection Selection
 st.markdown("### Select Collection")
 
-collections = fetch_collections()
+collections = fetch_collections()  # Assuming fetch_collections() function exists
 
 if collections:
     collection_names = [col['name'] for col in collections]
