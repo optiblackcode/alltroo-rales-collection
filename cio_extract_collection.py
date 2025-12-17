@@ -26,23 +26,16 @@ def parse_concatenated_json_objects(raw_text: str):
     Returns a list of dicts.
     """
     objects = []
-    buffer = ""
-    brace_count = 0
-
-    for char in raw_text:
-        if char == "{":
-            brace_count += 1
-        if brace_count > 0:
-            buffer += char
-        if char == "}":
-            brace_count -= 1
-            if brace_count == 0:
-                try:
-                    objects.append(json.loads(buffer))
-                except json.JSONDecodeError:
-                    pass
-                buffer = ""
-
+    raw_lines = raw_text.splitlines()  # Split by line breaks
+    
+    for line in raw_lines:
+        try:
+            # Attempt to load each line as a separate JSON object
+            objects.append(json.loads(line))
+        except json.JSONDecodeError:
+            # If decoding fails, skip that line (or log an error)
+            st.warning(f"Failed to decode line: {line}")
+    
     return objects
 
 # ============================================================================
@@ -83,8 +76,15 @@ def fetch_collection_details(collection_id):
 
         # Check if the response content type is JSON
         if response.headers['Content-Type'] == 'application/json':
-            # Parse the JSON response
-            return response.json()
+            # Case 1: Normal JSON response
+            data = response.json()
+
+            # If the response contains data directly
+            if isinstance(data, list):
+                return data
+
+            st.error("Response format is not as expected.")
+            return []
 
         # Case 2: Broken / concatenated JSON objects (your case)
         raw_text = response.text.strip()
@@ -133,7 +133,7 @@ if collections:
             
             if collection_details:
                 # Step 3: Display Collection Data in DataFrame
-                collection_data = collection_details.get('data', [])
+                collection_data = collection_details
                 
                 if collection_data:
                     # Create a pandas DataFrame
