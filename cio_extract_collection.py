@@ -2,169 +2,246 @@ import streamlit as st
 import requests
 import json
 import pandas as pd
+import re
+from datetime import datetime
+from bs4 import BeautifulSoup
+from typing import List, Dict
 
 # ============================================================================
-# Default Base URL (US Region)
+# PAGE CONFIG
 # ============================================================================
-base_url = "https://api.customer.io/v1/collections"
+st.set_page_config(
+    page_title="Customer.io Collection Toolkit",
+    page_icon="🎉",
+    layout="wide"
+)
 
-# API Key stored in secrets.toml for security
-api_key = st.secrets["credentials"]["app_api_key"]
+# ============================================================================
+# CUSTOMER.IO CONFIG
+# ============================================================================
+BASE_URL = "https://api.customer.io/v1/collections"
+API_KEY = st.secrets["credentials"]["app_api_key"]
 
-# Headers for API request
-headers = {
-    'Authorization': f'Bearer {api_key}',
-    'Content-Type': 'application/json'
+HEADERS = {
+    "Authorization": f"Bearer {API_KEY}",
+    "Content-Type": "application/json"
 }
 
 # ============================================================================
-# Helper function to parse concatenated JSON objects
+# HELPERS
 # ============================================================================
 def parse_concatenated_json_objects(raw_text: str):
-    """
-    Safely parses multiple JSON objects concatenated together.
-    Returns a list of dicts.
-    """
     objects = []
-    raw_lines = raw_text.splitlines()  # Split by line breaks
-    
-    for line in raw_lines:
+    for line in raw_text.splitlines():
         try:
-            # Attempt to load each line as a separate JSON object
             objects.append(json.loads(line))
         except json.JSONDecodeError:
-            # If decoding fails, skip that line (or log an error)
-            st.warning(f"Failed to decode line: {line}")
-    
+            pass
     return objects
 
-# ============================================================================
-# Fetch Collections List (GET /v1/collections)
-# ============================================================================
+
 def fetch_collections():
-    """Fetch the list of collections"""
     try:
-        response = requests.get(base_url, headers=headers)
-        response.raise_for_status()  # Raise an error for bad status codes
-        collections_data = response.json()
-        
-        # Parse collections data and extract necessary details
-        collections = []
-        for collection in collections_data['collections']:
-            collections.append({
-                "id": collection['id'],
-                "name": collection['name'],
-                "schema": collection['schema'],
-                "rows": collection['rows']
-            })
-        return collections
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching collections: {e}")
+        res = requests.get(BASE_URL, headers=HEADERS)
+        res.raise_for_status()
+        return res.json().get("collections", [])
+    except Exception as e:
+        st.error(f"Failed to fetch collections: {e}")
         return []
 
-# ============================================================================
-# Fetch Collection Details (GET /v1/collections/:id/content)
-# ============================================================================
+
 def fetch_collection_details(collection_id):
-    """Fetch details of a specific collection"""
-    url = f"{base_url}/{collection_id}/content"
-
     try:
-        # Fetch response from API
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()  # Raise an error for bad status codes
+        res = requests.get(f"{BASE_URL}/{collection_id}/content", headers=HEADERS)
+        res.raise_for_status()
 
-        # Check if the response content type is JSON
-        if response.headers['Content-Type'] == 'application/json':
-            # Case 1: Normal JSON response
-            data = response.json()
+        if res.headers.get("Content-Type", "").startswith("application/json"):
+            return res.json() if isinstance(res.json(), list) else []
 
-            # If the response contains data directly
-            if isinstance(data, list):
-                return data
+        return parse_concatenated_json_objects(res.text)
 
-            st.error("Response format is not as expected.")
-            return []
-
-        # Case 2: Broken / concatenated JSON objects (your case)
-        raw_text = response.text.strip()
-        parsed_objects = parse_concatenated_json_objects(raw_text)
-
-        if parsed_objects:
-            return parsed_objects
-
-        st.error("Could not parse collection content")
+    except Exception as e:
+        st.error(f"Failed to fetch collection content: {e}")
         return []
 
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching collection details: {e}")
-        return []
 
 # ============================================================================
-# STREAMLIT UI
+# ALLTROO RALLY EXTRACTOR
 # ============================================================================
-st.title("Customer.io Collection Manager")
+class AlltrooRallyExtractor:
+    def __init__(self):
+        self.rallies: List[Dict[str, str]] = []
+        self.error_message = None
 
-# Step 1: Dropdown for Collection Selection
-st.markdown("### Select Collection")
+    def extract_from_html(self, html: str) -> bool:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            self.rallies = []
 
-collections = fetch_collections()
+            cards = soup.find_all("div", class_="card cardRally")
+            if not cards:
+                self.error_message = "No rallies found"
+                return False
 
-if collections:
-    collection_names = [col['name'] for col in collections]
-    collection_ids = {col['name']: col['id'] for col in collections}
-    
-    selected_collection = st.selectbox("Choose a collection", collection_names)
-    
-    if selected_collection:
-        collection_id = collection_ids[selected_collection]
-        
-        # Display the schema and row count
-        selected_collection_info = next(
-            col for col in collections if col['name'] == selected_collection
-        )
-        st.markdown(f"**Schema**: {', '.join(selected_collection_info['schema'])}")
-        st.markdown(f"**Rows**: {selected_collection_info['rows']}")
-        
-        # Step 2: Fetch Collection Details
-        if st.button("Get Collection Details"):
-            st.spinner("Fetching collection content...")
-            collection_details = fetch_collection_details(collection_id)
-            
-            if collection_details:
-                # Step 3: Display Collection Data in DataFrame
-                collection_data = collection_details
-                
-                if collection_data:
-                    # Create a pandas DataFrame
-                    df = pd.DataFrame(collection_data)
-                    st.dataframe(df, use_container_width=True, hide_index=True)  # Hide index column
+            for card in cards:
+                link = card.find("a", href=True)
+                image = card.find("img", src=True)
+                title = card.find("h3")
+                desc = card.find("span")
 
-                    # Step 4: Export to CSV without the index
-                    csv_data = df.to_csv(index=False)
-                    st.download_button(
-                        label="Download as CSV",
-                        data=csv_data,
-                        file_name=f"collection_{collection_id}.csv",
-                        mime="text/csv"
-                    )
+                if not (link and title and desc):
+                    continue
 
-                    # Step 5: Display content as JSON
-                    json_data = json.dumps(collection_data, indent=2)
-                    st.subheader("Collection Content as JSON:")
-                    st.text_area("JSON Content", json_data, height=300)
+                image_url = image["src"] if image else ""
+                image_url = re.sub(r"-\d+x\d+", "", image_url)
 
-                    # Step 6: Export JSON content
-                    st.download_button(
-                        label="Download as JSON",
-                        data=json_data,
-                        file_name=f"collection_{collection_id}.json",
-                        mime="application/json"
-                    )
+                self.rallies.append({
+                    "Rally Name": title.get_text(strip=True),
+                    "Description": desc.get_text(strip=True),
+                    "Link": link["href"],
+                    "Image URL": image_url
+                })
 
-                else:
-                    st.warning("No data found for this collection.")
+            return True
+
+        except Exception as e:
+            self.error_message = str(e)
+            return False
+
+    def from_url(self, url: str) -> bool:
+        try:
+            res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+            res.raise_for_status()
+            return self.extract_from_html(res.text)
+        except Exception as e:
+            self.error_message = str(e)
+            return False
+
+    def dataframe(self):
+        return pd.DataFrame(self.rallies)
+
+
+# ============================================================================
+# SIDEBAR NAVIGATION
+# ============================================================================
+st.sidebar.title("Navigation")
+page = st.sidebar.radio(
+    "Go to",
+    [
+        "Customer.io Collection Manager",
+        "Live Rallies",
+        "Alltroo Rally Extractor"
+    ]
+)
+
+# ============================================================================
+# PAGE 1: COLLECTION MANAGER
+# ============================================================================
+if page == "Customer.io Collection Manager":
+    st.title("📦 Customer.io Collection Manager")
+
+    collections = fetch_collections()
+    if not collections:
+        st.warning("No collections found")
+    else:
+        names = [c["name"] for c in collections]
+        id_map = {c["name"]: c["id"] for c in collections}
+
+        selected = st.selectbox("Select Collection", names)
+        collection_id = id_map[selected]
+
+        if st.button("Fetch Collection Content"):
+            data = fetch_collection_details(collection_id)
+            if data:
+                df = pd.DataFrame(data)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+
+                json_data = json.dumps(data, indent=2)
+                st.text_area("JSON", json_data, height=300)
+
+                st.download_button("Download CSV", df.to_csv(index=False), "collection.csv")
+                st.download_button("Download JSON", json_data, "collection.json")
+
+
+# ============================================================================
+# PAGE 2: LIVE RALLIES
+# ============================================================================
+if page == "Live Rallies":
+    st.title("🎪 Live Rallies")
+
+    collections = fetch_collections()
+    names = [c["name"] for c in collections]
+    id_map = {c["name"]: c["id"] for c in collections}
+
+    selected = st.selectbox("Select Rally Collection", names)
+
+    if st.button("Load Live Rallies"):
+        rallies = fetch_collection_details(id_map[selected])
+
+        if rallies:
+            cols = st.columns(3)
+            for i, rally in enumerate(rallies):
+                with cols[i % 3]:
+                    st.markdown(f"### {rally.get('Rally Name', '-')}")
+                    st.image(rally.get("Image URL", ""), use_column_width=True)
+                    st.caption(rally.get("Description", ""))
+                    st.markdown(f"[Visit]({rally.get('Link', '#')})")
+
+
+# ============================================================================
+# PAGE 3: ALLTROO RALLY EXTRACTOR
+# ============================================================================
+if page == "Alltroo Rally Extractor":
+    st.title("🎉 Alltroo Rally Extractor")
+
+    extractor = AlltrooRallyExtractor()
+
+    url = st.text_input(
+        "Alltroo Rallies URL",
+        value="https://alltroo.com/rallies/"
+    )
+
+    collections = fetch_collections()
+    names = [c["name"] for c in collections]
+    id_map = {c["name"]: c["id"] for c in collections}
+
+    selected_collection = st.selectbox("Upload to Collection", names)
+
+    if st.button("Extract Rallies", type="primary"):
+        with st.spinner("Extracting rallies..."):
+            success = extractor.from_url(url)
+
+        if success:
+            st.success(f"Extracted {len(extractor.rallies)} rallies")
+        else:
+            st.error(extractor.error_message)
+
+    if extractor.rallies:
+        df = extractor.dataframe()
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+        json_payload = json.dumps(extractor.rallies, indent=2)
+        st.text_area("JSON Payload", json_payload, height=300)
+
+        st.download_button("Download CSV", df.to_csv(index=False), "rallies.csv")
+        st.download_button("Download JSON", json_payload, "rallies.json")
+
+        if st.button("⬆️ Upload to Customer.io", type="primary"):
+            with st.spinner("Uploading..."):
+                res = requests.put(
+                    f"{BASE_URL}/{id_map[selected_collection]}/content",
+                    headers=HEADERS,
+                    data=json_payload
+                )
+
+            if res.status_code in [200, 201, 204]:
+                st.success("✅ Upload successful")
             else:
-                st.error("Failed to fetch collection details.")
-else:
-    st.warning("No collections found. Please check your API key or the Customer.io account.")
+                st.error("❌ Upload failed")
+                st.code(res.text)
+
+# ============================================================================
+# FOOTER
+# ============================================================================
+st.divider()
+st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
