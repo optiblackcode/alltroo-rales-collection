@@ -107,22 +107,22 @@ class AlltrooRallyExtractor:
         self.rallies = []
         
         for card in cards:
-                    # Extract link (updated to use a tag with 'link--noStyle')
-                    link_elem = wrapper.find('a', href=True)
-                    link = link_elem.get('href', '') if link_elem else ''
+            # Extract link (updated to use a tag with 'link--noStyle')
+            link_elem = wrapper.find('a', href=True)
+            link = link_elem.get('href', '') if link_elem else ''
                     
-                    # Extract image URL (updated to grab image inside card__thumbnail)
-                    img_elem = wrapper.find('img', src=True)
-                    image_url = img_elem.get('src', '') if img_elem else ''
-                    img = re.sub(r'-\d+x\d+', '', image_url)  # Remove sizing
+            # Extract image URL (updated to grab image inside card__thumbnail)
+            img_elem = wrapper.find('img', src=True)
+            image_url = img_elem.get('src', '') if img_elem else ''
+            img = re.sub(r'-\d+x\d+', '', image_url)  # Remove sizing
                     
-                    # Extract rally name (updated to find h3 tag)
-                    name_elem = wrapper.find('h3', class_='heading heading--xsmall')
-                    title = name_elem.get_text(strip=True) if name_elem else ''
+            # Extract rally name (updated to find h3 tag)
+            name_elem = wrapper.find('h3', class_='heading heading--xsmall')
+            title = name_elem.get_text(strip=True) if name_elem else ''
                     
-                    # Extract description (updated to find span with class 'body body--xsmall')
-                    description_elem = wrapper.find('span', class_='body body--xsmall')
-                    desc = description_elem.get_text(strip=True) if description_elem else ''
+            # Extract description (updated to find span with class 'body body--xsmall')
+            description_elem = wrapper.find('span', class_='body body--xsmall')
+            desc = description_elem.get_text(strip=True) if description_elem else ''       
 
             if not (link and title and desc):
                 continue
