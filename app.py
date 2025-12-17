@@ -487,20 +487,19 @@ with st.expander("🛠️ Troubleshooting"):
 # ============================================================================
 
 st.divider()
-
 footer_col1, footer_col2, footer_col3 = st.columns(3)
 
 with footer_col1:
     st.markdown("### 📖 Documentation")
-    st.markdown("[View on GitHub](#)")
+    st.markdown("[View on GitHub](https://github.com/optiblackcode/alltroo-rales-collection)")  # Link to documentation
 
 with footer_col2:
     st.markdown("### 🐛 Report Issues")
-    st.markdown("[GitHub Issues](#)")
+    st.markdown("[GitHub Issues](https://github.com/optiblackcode/alltroo-rales-collection/issues/new)")  # Link to report issues
 
 with footer_col3:
     st.markdown("### 💡 Feature Requests")
-    st.markdown("[Suggest Improvements](#)")
+    st.markdown("[Suggest Improvements](https://github.com/optiblackcode/alltroo-rales-collection/issues/new)")  # Link to feature requests
 
 st.markdown("---")
 st.markdown(f"**Last updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | **Version:** 1.0")
